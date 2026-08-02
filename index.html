@@ -125,6 +125,10 @@
   </div>
   <div class="note" id="providerHelp" style="margin-top:-10px;"></div>
   <div>
+    <label>URL du relais (Cloudflare Worker) — laisser vide si non utilisé</label>
+    <input id="proxyUrl" placeholder="https://jarvis-proxy.tonpseudo.workers.dev">
+  </div>
+  <div>
     <label>Clé API ElevenLabs</label>
     <input id="elKey" type="password" placeholder="xi-api-key">
   </div>
@@ -147,7 +151,7 @@
 
 <script>
 const el = id => document.getElementById(id);
-const state = { provider:'groq', claudeKey:'', elKey:'', elVoice:'', lang:'fr-FR', busy:false };
+const state = { provider:'groq', claudeKey:'', elKey:'', elVoice:'', proxyUrl:'', lang:'fr-FR', busy:false };
 
 const providerInfo = {
   groq: {
@@ -210,6 +214,7 @@ el('closePanel').onclick = ()=>{
   state.claudeKey = el('claudeKey').value.trim();
   state.elKey = el('elKey').value.trim();
   state.elVoice = el('elVoice').value.trim();
+  state.proxyUrl = el('proxyUrl').value.trim();
   state.lang = el('langSelect').value;
   el('panel').classList.remove('open');
   setState('STANDBY');
@@ -258,6 +263,23 @@ el('textInput').addEventListener('keydown', e=>{ if(e.key==='Enter') el('sendTex
 // ---- AI call (multi-fournisseur) ----
 const SYSTEM_PROMPT = "Tu es J.A.R.V.I.S., l'assistant IA de Tony Stark : calme, précis, un peu pince-sans-rire, toujours utile. Réponds en français, de façon concise (2-4 phrases max), sauf si on te demande plus de détails.";
 
+// Envoie la requête soit directement, soit via le relais Cloudflare (pour éviter les blocages CORS)
+async function callProvider(targetUrl, headers, body){
+  if(state.proxyUrl){
+    const res = await fetch(state.proxyUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ targetUrl, headers, body })
+    });
+    if(!res.ok) throw new Error('Relais: '+res.status);
+    return res.json();
+  }else{
+    const res = await fetch(targetUrl, { method:'POST', headers, body: JSON.stringify(body) });
+    if(!res.ok) throw new Error('API: '+res.status);
+    return res.json();
+  }
+}
+
 async function askAI(prompt){
   if(state.provider === 'groq') return askGroq(prompt);
   if(state.provider === 'gemini') return askGemini(prompt);
@@ -266,87 +288,52 @@ async function askAI(prompt){
 }
 
 async function askClaude(prompt){
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST',
-    headers:{
+  const data = await callProvider('https://api.anthropic.com/v1/messages',
+    {
       'Content-Type':'application/json',
       'x-api-key': state.claudeKey,
       'anthropic-version':'2023-06-01',
       'anthropic-dangerous-direct-browser-access':'true'
     },
-    body: JSON.stringify({
-      model:'claude-sonnet-4-6',
-      max_tokens: 400,
-      system: SYSTEM_PROMPT,
-      messages:[{role:'user', content: prompt}]
-    })
-  });
-  if(!res.ok){ throw new Error('Claude API: '+res.status); }
-  const data = await res.json();
-  const textBlock = data.content.find(b=>b.type==='text');
+    { model:'claude-sonnet-4-6', max_tokens:400, system:SYSTEM_PROMPT, messages:[{role:'user', content:prompt}] }
+  );
+  const textBlock = data.content?.find(b=>b.type==='text');
   return textBlock ? textBlock.text : "...";
 }
 
 async function askGroq(prompt){
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json',
-      'Authorization': 'Bearer ' + state.claudeKey
-    },
-    body: JSON.stringify({
-      model:'llama-3.3-70b-versatile',
-      max_tokens: 400,
-      messages:[
-        {role:'system', content: SYSTEM_PROMPT},
-        {role:'user', content: prompt}
-      ]
-    })
-  });
-  if(!res.ok){ throw new Error('Groq API: '+res.status); }
-  const data = await res.json();
+  const data = await callProvider('https://api.groq.com/openai/v1/chat/completions',
+    { 'Content-Type':'application/json', 'Authorization':'Bearer '+state.claudeKey },
+    { model:'llama-3.3-70b-versatile', max_tokens:400, messages:[
+      {role:'system', content:SYSTEM_PROMPT},
+      {role:'user', content:prompt}
+    ]}
+  );
   return data.choices?.[0]?.message?.content || "...";
 }
 
 async function askGemini(prompt){
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.claudeKey}`;
-  const res = await fetch(url, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts:[{ text: SYSTEM_PROMPT }] },
-      contents:[{ role:'user', parts:[{ text: prompt }] }]
-    })
-  });
-  if(!res.ok){ throw new Error('Gemini API: '+res.status); }
-  const data = await res.json();
+  const data = await callProvider(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.claudeKey}`,
+    { 'Content-Type':'application/json' },
+    { systemInstruction:{ parts:[{ text:SYSTEM_PROMPT }] }, contents:[{ role:'user', parts:[{ text:prompt }] }] }
+  );
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
 }
 
 async function askMelious(prompt){
-  const res = await fetch('https://api.melious.ai/v1/chat/completions', {
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json',
-      'Authorization': 'Bearer ' + state.claudeKey
-    },
-    body: JSON.stringify({
-      model:'gpt-oss-120b',
-      messages:[
-        {role:'system', content: SYSTEM_PROMPT},
-        {role:'user', content: prompt}
-      ]
-    })
-  });
-  if(!res.ok){ throw new Error('Melious API: '+res.status); }
-  const data = await res.json();
+  const data = await callProvider('https://api.melious.ai/v1/chat/completions',
+    { 'Content-Type':'application/json', 'Authorization':'Bearer '+state.claudeKey },
+    { model:'gpt-oss-120b', messages:[
+      {role:'system', content:SYSTEM_PROMPT},
+      {role:'user', content:prompt}
+    ]}
+  );
   return data.choices?.[0]?.message?.content || "...";
 }
 
 // ---- ElevenLabs TTS ----
 async function speak(text){
   if(!state.elKey || !state.elVoice){
-    // no voice configured, just show text
     return;
   }
   setState('PAROLE');
@@ -363,14 +350,18 @@ async function speak(text){
         voice_settings:{ stability:0.5, similarity_boost:0.75 }
       })
     });
-    if(!res.ok) throw new Error('ElevenLabs: '+res.status);
+    if(!res.ok){
+      const errText = await res.text();
+      throw new Error('ElevenLabs '+res.status+': '+errText.slice(0,150));
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     audio.onended = ()=> setState('STANDBY');
-    audio.play();
+    await audio.play();
   }catch(e){
     console.error(e);
+    transcriptEl.textContent += '  [Voix indisponible: '+e.message+']';
     setState('STANDBY');
   }
 }
@@ -393,4 +384,4 @@ async function handleUserInput(text){
 }
 </script>
 </body>
-</html>
+  </html>
