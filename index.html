@@ -47,17 +47,13 @@
     background:radial-gradient(circle at 40% 35%, #0d3a3f, #01131a 70%);
     display:flex;align-items:center;justify-content:center;
     box-shadow:inset 0 0 30px rgba(45,225,234,.5), 0 0 40px rgba(45,225,234,.25);
-    transition:box-shadow .3s;
+    transition:box-shadow .3s;cursor:pointer;
   }
+  #core:active{transform:translate(-50%,-50%) scale(.96);}
   #core.listening{box-shadow:inset 0 0 40px rgba(45,225,234,.9), 0 0 60px rgba(45,225,234,.6);}
   #core.speaking{box-shadow:inset 0 0 40px rgba(120,255,230,.9), 0 0 70px rgba(120,255,230,.5);}
   #status{font-family:'Orbitron',sans-serif;font-weight:600;font-size:.78rem;letter-spacing:.15em;}
-
-  #mic{position:absolute;bottom:6%;left:50%;transform:translateX(-50%);
-    width:64px;height:64px;border-radius:50%;border:2px solid var(--cyan);
-    background:rgba(45,225,234,.08);color:var(--cyan);font-size:26px;
-    display:flex;align-items:center;justify-content:center;box-shadow:var(--glow);}
-  #mic.active{background:rgba(45,225,234,.4);}
+  #tapHint{position:absolute;bottom:16%;left:0;right:0;text-align:center;font-size:.65rem;opacity:.45;letter-spacing:.1em;}
 
   #topbar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;
     align-items:center;padding:14px 16px;font-size:.7rem;letter-spacing:.1em;}
@@ -82,6 +78,9 @@
   #textFallback input{flex:1;background:var(--panel);border:1px solid var(--cyan-dim);color:var(--cyan);
     padding:8px;border-radius:6px;font-family:'Share Tech Mono',monospace;}
   #textFallback button{background:none;border:1px solid var(--cyan);color:var(--cyan);border-radius:6px;padding:8px 12px;}
+  #colorSwatches{display:flex;gap:10px;margin-bottom:14px;}
+  .swatch{width:38px;height:38px;border-radius:50%;border:2px solid transparent;cursor:pointer;flex-shrink:0;}
+  .swatch.selected{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,.6);}
 </style>
 </head>
 <body>
@@ -103,9 +102,9 @@
     <div class="ring r3"></div>
     <div id="core"><div id="status">STANDBY</div></div>
   </div>
+  <div id="tapHint">TOUCHER POUR PARLER</div>
 
   <div id="transcript"></div>
-  <button id="mic">🎤</button>
 </div>
 
 <div id="panel">
@@ -137,6 +136,10 @@
     <input id="elVoice" placeholder="ex: 21m00Tcm4TlvDq8ikWAM">
   </div>
   <div>
+    <label>Couleur du HUD</label>
+    <div id="colorSwatches"></div>
+  </div>
+  <div>
     <label>Langue de reconnaissance vocale</label>
     <select id="langSelect">
       <option value="fr-FR">Français</option>
@@ -151,7 +154,38 @@
 
 <script>
 const el = id => document.getElementById(id);
-const state = { provider:'groq', claudeKey:'', elKey:'', elVoice:'', proxyUrl:'', lang:'fr-FR', busy:false };
+const state = { provider:'groq', claudeKey:'', elKey:'', elVoice:'', proxyUrl:'', lang:'fr-FR', busy:false, color:'cyan' };
+
+const THEMES = {
+  cyan:   { main:'#2de1ea', dim:'#0f7c82', rgb:'45,225,234' },
+  red:    { main:'#ff3b3b', dim:'#8a1414', rgb:'255,59,59' },
+  violet: { main:'#b06bff', dim:'#5a2f8a', rgb:'176,107,255' },
+  green:  { main:'#39ff9e', dim:'#0f7a4c', rgb:'57,255,158' },
+  amber:  { main:'#ffb020', dim:'#8a5a10', rgb:'255,176,32' }
+};
+
+function applyTheme(name){
+  const t = THEMES[name] || THEMES.cyan;
+  const root = document.documentElement.style;
+  root.setProperty('--cyan', t.main);
+  root.setProperty('--cyan-dim', t.dim);
+  root.setProperty('--glow', `0 0 12px rgba(${t.rgb},.55)`);
+  document.querySelectorAll('.swatch').forEach(s=> s.classList.toggle('selected', s.dataset.theme === name));
+}
+
+function renderSwatches(){
+  const box = el('colorSwatches');
+  box.innerHTML = '';
+  Object.entries(THEMES).forEach(([name, t])=>{
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    sw.dataset.theme = name;
+    sw.style.background = t.main;
+    sw.onclick = ()=>{ state.color = name; applyTheme(name); };
+    box.appendChild(sw);
+  });
+}
+renderSwatches();
 
 const providerInfo = {
   groq: {
@@ -233,6 +267,7 @@ try{
     el('langSelect').value = state.lang;
   }
 }catch(e){}
+applyTheme(state.color);
 updateProviderUI();
 // open settings on first load if no keys
 if(!state.claudeKey) el('panel').classList.add('open');
@@ -256,13 +291,12 @@ if(SpeechRecognition){
   transcriptEl.textContent = 'Reconnaissance vocale non supportée par ce navigateur, utilise le champ texte.';
 }
 
-el('mic').onclick = ()=>{
-  if(!recognition){ return; }
+core.onclick = ()=>{
+  if(!recognition){ transcriptEl.textContent = 'Reconnaissance vocale non supportée, utilise le champ texte.'; return; }
   if(!state.claudeKey){ el('panel').classList.add('open'); return; }
+  if(state.busy) return;
   recognition.lang = state.lang;
-  el('mic').classList.add('active');
   try{ recognition.start(); }catch(e){}
-  setTimeout(()=> el('mic').classList.remove('active'), 4000);
 };
 
 el('sendText').onclick = ()=>{
