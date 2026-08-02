@@ -265,7 +265,10 @@ function setState(s){
 
 // settings panel
 function saveSettings(){
-  try{ localStorage.setItem('jarvisSettings', JSON.stringify(state)); }catch(e){}
+  try{
+    const { history, ...toSave } = state; // l'historique de conversation ne doit jamais être sauvegardé
+    localStorage.setItem('jarvisSettings', JSON.stringify(toSave));
+  }catch(e){}
 }
 el('settingsBtn').onclick = ()=> el('panel').classList.add('open');
 el('muteBtn').onclick = ()=>{
@@ -326,7 +329,7 @@ try{
   }
 }catch(e){}
 if(!state.contacts) state.contacts = [];
-if(!state.history) state.history = [];
+state.history = []; // toujours repartir d'une mémoire propre à chaque ouverture de l'app
 renderContacts();
 applyTheme(state.color);
 updateProviderUI();
@@ -444,20 +447,7 @@ function openSMS(number, message){
   window.location.href = `sms:${number}?body=${encodeURIComponent(message)}`;
 }
 
-// ---- Météo (Open-Meteo, gratuit, sans clé) ----
-async function getWeather(){
-  return new Promise((resolve, reject)=>{
-    if(!navigator.geolocation){ reject(new Error('Géolocalisation non disponible')); return; }
-    navigator.geolocation.getCurrentPosition(async pos=>{
-      try{
-        const { latitude, longitude } = pos.coords;
-        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code`);
-        const data = await res.json();
-        resolve(data.current);
-      }catch(e){ reject(e); }
-    }, err=> reject(new Error('Position refusée')));
-  });
-}
+// ---- Météo & heure (Open-Meteo, gratuit, sans clé, marche pour n'importe quelle ville) ----
 function weatherCodeToText(code){
   if(code===0) return 'ciel dégagé';
   if([1,2,3].includes(code)) return 'partiellement nuageux';
@@ -467,27 +457,58 @@ function weatherCodeToText(code){
   if([95,96,99].includes(code)) return 'orage';
   return 'conditions variables';
 }
-async function announceWeather(){
-  transcriptEl.textContent = 'Localisation en cours...';
+
+// Extrait un nom de ville depuis une phrase du type "... à Montréal", "... en France"
+function extractCity(text){
+  const m = text.match(/(?:\bà\b|\ba\b|\ben\b|\bdans\b)\s+([a-zà-ÿ][a-zà-ÿ' \-]{1,28})[\?\.! ]*$/i);
+  return m ? m[1].trim() : null;
+}
+
+async function geocodeCity(name){
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=fr&format=json`);
+  const data = await res.json();
+  if(!data.results || !data.results.length) throw new Error(`Je ne trouve pas la ville "${name}"`);
+  const r = data.results[0];
+  return { lat:r.latitude, lon:r.longitude, label: r.name + (r.country ? ', '+r.country : '') };
+}
+
+async function fetchWeatherTime(lat, lon){
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`);
+  if(!res.ok) throw new Error('Service météo indisponible');
+  return res.json();
+}
+
+async function handleWeatherQuery(city){
+  transcriptEl.textContent = city ? `Recherche de ${city}...` : 'Localisation en cours...';
   try{
-    const w = await getWeather();
-    const txt = `Il fait actuellement ${Math.round(w.temperature_2m)}°C, ${weatherCodeToText(w.weather_code)}.`;
+    let lat, lon, label = 'ici';
+    if(city){
+      const g = await geocodeCity(city);
+      lat = g.lat; lon = g.lon; label = g.la, g.lon);
+    const [, hm] = data.current.time.split('T');
+    const [h,m] = hm.split(':');
+    const txt = `Il est ${parseInt(h)}h${m} à ${g.label}.`;
     transcriptEl.textContent = txt;
     speak(txt);
   }catch(e){
-    transcriptEl.textContent = 'Météo indisponible: '+e.message;
+    const txt = "Heure indisponible: "+e.message;
+    transcriptEl.textContent = txt;
+    speak(txt);
   }
 }
-el('weatherBtn').onclick = announceWeather;
+
+el('weatherBtn').onclick = ()=> handleWeatherQuery(null);
 
 // Détecte les commandes qu'on peut exécuter nous-mêmes, sans passer par l'IA.
 // Retourne true si la commande a été traitée localement.
 function tryLocalCommand(text){
   const low = text.toLowerCase();
 
-  // Météo : "quel temps fait-il", "il fait quoi dehors", "météo"
-  if(/m[ée]t[ée]o|quel temps|il fait (quoi|beau|froid|chaud)/.test(low)){
-    announceWeather();
+  // Annuler le minuteur en cours
+  if(/annule|arrête|stoppe|stop/.test(low) && /minut(eur|erie)|chrono/.test(low)){
+    if(timerInterval){ clearInterval(timerInterval); timerInterval = null; el('timerBar').textContent=''; }
+    transcriptEl.textContent = 'Minuteur annulé.';
+    speak(transcriptEl.textContent);
     return true;
   }
 
@@ -505,6 +526,32 @@ function tryLocalCommand(text){
       speak(transcriptEl.textContent);
       return true;
     }
+  }
+
+  // Heure : "quelle heure est-il à Montréal", "il est quelle heure"
+  if(/quelle heure|heure est.?il/.test(low)){
+    const city = extractCity(low);
+    if(city){ handleTimeQuery(city); return true; }
+    const now = new Date();
+    const txt = `Il est ${now.getHours()}h${now.getMinutes().toString().padStart(2,'0')}.`;
+    transcriptEl.textContent = txt;
+    speak(txt);
+    return true;
+  }
+
+  // Météo : "quel temps fait-il à Montréal", "il fait quoi dehors", "météo à Tokyo"
+  if(/m[ée]t[ée]o|quel temps|il fait (quoi|beau|froid|chaud)/.test(low)){
+    const city = extractCity(low);
+    handleWeatherQuery(city);
+    return true;
+  }
+
+  // Effacer la mémoire de conversation : "efface ta mémoire", "oublie tout"
+  if(/efface (ta )?m[ée]moire|oublie tout|reset(te)? ta m[ée]moire/.test(low)){
+    state.history = [];
+    transcriptEl.textContent = 'Mémoire effacée, monsieur.';
+    speak(transcriptEl.textContent);
+    return true;
   }
 
   // SMS : "envoie un message à Paul dis-lui que j'arrive" / "sms à Paul : j'arrive"
@@ -549,6 +596,7 @@ async function callProvider(targetUrl, headers, body){
     return res.json();
   }
 }
+
 
 async function askAI(prompt){
   if(state.provider === 'groq') return askGroq(prompt);
@@ -614,7 +662,7 @@ async function speak(text){
   if(state.muted || !state.elKey || !state.elVoice){
     return;
   }
-  // Coupe toute voix encore en cours pour éviter 
+  // Coupe toute voix encore en cours pour éviter les réponses qui se chevauchent
   if(currentAudio){
     currentAudio.pause();
     currentAudio = null;
@@ -657,27 +705,34 @@ async function handleUserInput(text){
   if(!state.claudeKey){ transcriptEl.textContent = 'Configure ta clé API dans les réglages ⚙'; el('panel').classList.add('open'); return; }
   state.busy = true;
   setState('ANALYSE');
+  let reply;
   try{
-    const reply = await askAI(text);
-    // on tronque ce qu'on garde en mémoire pour éviter que l'historique devienne trop gros
+    reply = await askAI(text);
+  }catch(e1){
+    console.error('1ère tentative échouée:', e1);
+    // on efface la mémoire de conversation (cause la plus probable d'une requête trop grosse) et on retente une fois
+    state.history = [];
+    try{
+      reply = await askAI(text);
+    }catch(e2){
+      console.error('2ème tentative échouée:', e2);
+      transcriptEl.textContent = "Je n'arrive pas à joindre le service IA en ce moment ("+e2.message+").";
+      speak(transcriptEl.textContent);
+      state.busy = false;
+      return;
+    }
+  }
+  try{
     const trimmedReply = reply.length > 400 ? reply.slice(0,400)+'…' : reply;
     state.history.push({role:'user', content:text}, {role:'assistant', content:trimmedReply});
     if(state.history.length > 8) state.history = state.history.slice(-8);
-    saveSettings();
     transcriptEl.textContent = reply;
     await speak(reply);
     if(!state.elKey || !state.elVoice || state.muted) setState('STANDBY');
   }catch(e){
     console.error(e);
-    if(e.message && e.message.includes('413')){
-      state.history = [];
-      saveSettings();
-      transcriptEl.textContent = "Mémoire trop pleine, je viens de la vider — répète ta question, monsieur.";
-      speak(transcriptEl.textContent);
-    }else{
-      transcriptEl.textContent = 'Erreur: '+e.message;
-      setState('STANDBY');
-    }
+    transcriptEl.textContent = 'Erreur: '+e.message;
+    setState('STANDBY');
   }
   state.busy = false;
 }
