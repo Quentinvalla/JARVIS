@@ -484,7 +484,28 @@ async function handleWeatherQuery(city){
     let lat, lon, label = 'ici';
     if(city){
       const g = await geocodeCity(city);
-      lat = g.lat; lon = g.lon; label = g.la, g.lon);
+      lat = g.lat; lon = g.lon; label = g.label;
+    }else{
+      if(!navigator.geolocation) throw new Error('Géolocalisation non disponible');
+      const pos = await new Promise((res,rej)=> navigator.geolocation.getCurrentPosition(res, rej, {timeout:8000}));
+      lat = pos.coords.latitude; lon = pos.coords.longitude;
+    }
+    const data = await fetchWeatherTime(lat, lon);
+    const txt = `Il fait ${Math.round(data.current.temperature_2m)}°C à ${label}, ${weatherCodeToText(data.current.weather_code)}.`;
+    transcriptEl.textContent = txt;
+    speak(txt);
+  }catch(e){
+    const txt = 'Météo indisponible: '+e.message;
+    transcriptEl.textContent = txt;
+    speak(txt);
+  }
+}
+
+async function handleTimeQuery(city){
+  transcriptEl.textContent = `Recherche de l'heure à ${city}...`;
+  try{
+    const g = await geocodeCity(city);
+    const data = await fetchWeatherTime(g.lat, g.lon);
     const [, hm] = data.current.time.split('T');
     const [h,m] = hm.split(':');
     const txt = `Il est ${parseInt(h)}h${m} à ${g.label}.`;
