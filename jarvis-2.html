@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>J.A.R.V.I.S.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cyan:#2de1ea;
+    --cyan-dim:#0f7c82;
+    --bg:#02060a;
+    --panel:#04121a;
+    --glow: 0 0 12px rgba(45,225,234,.55);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--cyan);
+    font-family:'Share Tech Mono',monospace;overflow:hidden;user-select:none;}
+  #app{position:relative;height:100vh;width:100vw;display:flex;align-items:center;justify-content:center;}
+
+  /* background grid */
+  #app::before{
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(rgba(45,225,234,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(45,225,234,.05) 1px, transparent 1px);
+    background-size:28px 28px;
+    mask-image: radial-gradient(circle at center, black 40%, transparent 78%);
+    pointer-events:none;
+  }
+
+  .rings{position:relative;width:min(86vw,420px);height:min(86vw,420px);}
+  .ring{position:absolute;border-radius:50%;border:1px solid var(--cyan-dim);
+    top:50%;left:50%;transform:translate(-50%,-50%);}
+  .ring.r1{width:100%;height:100%;border-style:dashed;animation:spin 40s linear infinite;}
+  .ring.r2{width:82%;height:82%;border-color:var(--cyan);opacity:.5;animation:spin 26s linear infinite reverse;}
+  .ring.r3{width:64%;height:64%;border-width:2px;box-shadow:var(--glow);animation:pulseRing 2.6s ease-in-out infinite;}
+  .tick{position:absolute;top:50%;left:50%;width:2px;height:10px;background:var(--cyan);
+    transform-origin:0 0;opacity:.6;}
+
+  @keyframes spin{from{transform:translate(-50%,-50%) rotate(0)}to{transform:translate(-50%,-50%) rotate(360deg)}}
+  @keyframes pulseRing{0%,100%{box-shadow:0 0 8px rgba(45,225,234,.4)}50%{box-shadow:0 0 26px rgba(45,225,234,.9)}}
+
+  #core{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:38%;height:38%;border-radius:50%;
+    background:radial-gradient(circle at 40% 35%, #0d3a3f, #01131a 70%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 0 30px rgba(45,225,234,.5), 0 0 40px rgba(45,225,234,.25);
+    transition:box-shadow .3s;
+  }
+  #core.listening{box-shadow:inset 0 0 40px rgba(45,225,234,.9), 0 0 60px rgba(45,225,234,.6);}
+  #core.speaking{box-shadow:inset 0 0 40px rgba(120,255,230,.9), 0 0 70px rgba(120,255,230,.5);}
+  #status{font-family:'Orbitron',sans-serif;font-weight:600;font-size:.78rem;letter-spacing:.15em;}
+
+  #mic{position:absolute;bottom:6%;left:50%;transform:translateX(-50%);
+    width:64px;height:64px;border-radius:50%;border:2px solid var(--cyan);
+    background:rgba(45,225,234,.08);color:var(--cyan);font-size:26px;
+    display:flex;align-items:center;justify-content:center;box-shadow:var(--glow);}
+  #mic.active{background:rgba(45,225,234,.4);}
+
+  #topbar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;
+    align-items:center;padding:14px 16px;font-size:.7rem;letter-spacing:.1em;}
+  #topbar .label{opacity:.85}
+  #settingsBtn{background:none;border:1px solid var(--cyan-dim);color:var(--cyan);
+    border-radius:6px;padding:6px 10px;font-family:'Share Tech Mono',monospace;}
+
+  #transcript{position:absolute;bottom:22%;left:6%;right:6%;text-align:center;
+    font-size:.85rem;min-height:1.4em;line-height:1.4em;color:#c9fbff;text-shadow:0 0 6px rgba(45,225,234,.6);}
+
+  #panel{position:absolute;inset:0;background:rgba(2,6,10,.94);display:none;
+    flex-direction:column;gap:14px;padding:24px;z-index:20;overflow-y:auto;}
+  #panel.open{display:flex;}
+  #panel h2{font-family:'Orbitron',sans-serif;letter-spacing:.1em;margin:0 0 6px;}
+  #panel label{font-size:.72rem;opacity:.8;display:block;margin-bottom:4px;}
+  #panel input, #panel select{width:100%;background:var(--panel);border:1px solid var(--cyan-dim);
+    color:var(--cyan);padding:10px;border-radius:6px;font-family:'Share Tech Mono',monospace;margin-bottom:14px;}
+  #panel button.primary{background:var(--cyan);color:#001a1d;border:none;padding:12px;border-radius:6px;
+    font-family:'Orbitron',sans-serif;font-weight:600;letter-spacing:.05em;}
+  #panel .note{font-size:.68rem;opacity:.6;line-height:1.4;}
+  #textFallback{position:absolute;top:52px;left:6%;right:6%;display:flex;gap:8px;}
+  #textFallback input{flex:1;background:var(--panel);border:1px solid var(--cyan-dim);color:var(--cyan);
+    padding:8px;border-radius:6px;font-family:'Share Tech Mono',monospace;}
+  #textFallback button{background:none;border:1px solid var(--cyan);color:var(--cyan);border-radius:6px;padding:8px 12px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <span class="label" id="clock">--:--:--</span>
+    <span class="label">SYSTEM // <span id="sysState">STANDBY</span></span>
+    <button id="settingsBtn">⚙</button>
+  </div>
+
+  <div id="textFallback">
+    <input id="textInput" placeholder="Ecrire à J.A.R.V.I.S...">
+    <button id="sendText">➤</button>
+  </div>
+
+  <div class="rings">
+    <div class="ring r1"></div>
+    <div class="ring r2"></div>
+    <div class="ring r3"></div>
+    <div id="core"><div id="status">STANDBY</div></div>
+  </div>
+
+  <div id="transcript"></div>
+  <button id="mic">🎤</button>
+</div>
+
+<div id="panel">
+  <h2>RÉGLAGES</h2>
+  <div>
+    <label>Fournisseur IA</label>
+    <select id="providerSelect">
+      <option value="groq">Groq (gratuit — Llama 3.3 70B)</option>
+      <option value="gemini">Google Gemini (gratuit)</option>
+      <option value="melious">Melious (gratuit — EU, open-weight)</option>
+      <option value="anthropic">Anthropic Claude (payant, 5$ offerts)</option>
+    </select>
+  </div>
+  <div>
+    <label id="claudeKeyLabel">Clé API</label>
+    <input id="claudeKey" type="password" placeholder="colle ta clé ici">
+  </div>
+  <div class="note" id="providerHelp" style="margin-top:-10px;"></div>
+  <div>
+    <label>Clé API ElevenLabs</label>
+    <input id="elKey" type="password" placeholder="xi-api-key">
+  </div>
+  <div>
+    <label>Voice ID ElevenLabs (voix "Jarvis")</label>
+    <input id="elVoice" placeholder="ex: 21m00Tcm4TlvDq8ikWAM">
+  </div>
+  <div>
+    <label>Langue de reconnaissance vocale</label>
+    <select id="langSelect">
+      <option value="fr-FR">Français</option>
+      <option value="en-US">English</option>
+    </select>
+  </div>
+  <div class="note">
+    Ces clés restent en mémoire seulement le temps de la session (rien n'est stocké sur disque ni envoyé ailleurs qu'à Anthropic / ElevenLabs directement depuis ce téléphone). Referme et rouvre l'app = à re-saisir.
+  </div>
+  <button class="primary" id="closePanel">ACTIVER</button>
+</div>
+
+<script>
+const el = id => document.getElementById(id);
+const state = { provider:'groq', claudeKey:'', elKey:'', elVoice:'', lang:'fr-FR', busy:false };
+
+const providerInfo = {
+  groq: {
+    label:'Clé API Groq',
+    help:'Gratuit. Crée un compte sur console.groq.com → API Keys → Create API Key. Aucune carte bancaire demandée.'
+  },
+  gemini: {
+    label:'Clé API Google Gemini',
+    help:'Gratuit. Va sur aistudio.google.com/apikey, connecte-toi avec un compte Google, clique "Create API key".'
+  },
+  melious: {
+    label:'Clé API Melious',
+    help:'Gratuit, sans carte bancaire. Crée un compte sur melious.ai → Account → API keys → Create API key.'
+  },
+  anthropic: {
+    label:'Clé API Anthropic (Claude)',
+    help:'5$ de crédits offerts à l\'inscription sur platform.claude.com, puis payant.'
+  }
+};
+function updateProviderUI(){
+  const info = providerInfo[state.provider];
+  el('claudeKeyLabel').textContent = info.label;
+  el('providerHelp').textContent = info.help;
+}
+el('providerSelect').addEventListener('change', e=>{
+  state.provider = e.target.value;
+  updateProviderUI();
+});
+
+const core = el('core'), statusEl = el('status'), sysState = el('sysState'), transcriptEl = el('transcript');
+
+// clock
+setInterval(()=>{ el('clock').textContent = new Date().toLocaleTimeString('fr-FR'); }, 1000);
+
+// tick marks around ring 1
+(function drawTicks(){
+  const ring = document.querySelector('.ring.r1');
+  const n = 60;
+  for(let i=0;i<n;i++){
+    const t = document.createElement('div');
+    t.className='tick';
+    t.style.transform = `rotate(${(360/n)*i}deg) translate(0,-1px)`;
+    if(i%5!==0) t.style.height='5px';
+    ring.appendChild(t);
+  }
+})();
+
+function setState(s){
+  sysState.textContent = s;
+  statusEl.textContent = s;
+  core.classList.remove('listening','speaking');
+  if(s==='ÉCOUTE') core.classList.add('listening');
+  if(s==='PAROLE') core.classList.add('speaking');
+}
+
+// settings panel
+el('settingsBtn').onclick = ()=> el('panel').classList.add('open');
+el('closePanel').onclick = ()=>{
+  state.provider = el('providerSelect').value;
+  state.claudeKey = el('claudeKey').value.trim();
+  state.elKey = el('elKey').value.trim();
+  state.elVoice = el('elVoice').value.trim();
+  state.lang = el('langSelect').value;
+  el('panel').classList.remove('open');
+  setState('STANDBY');
+};
+updateProviderUI();
+// open settings on first load if no keys
+if(!state.claudeKey) el('panel').classList.add('open');
+
+// ---- Speech recognition ----
+let recognition = null;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if(SpeechRecognition){
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.onstart = ()=> setState('ÉCOUTE');
+  recognition.onerror = (e)=>{ setState('STANDBY'); transcriptEl.textContent = 'Erreur micro: '+e.error; };
+  recognition.onresult = (e)=>{
+    const text = e.results[0][0].transcript;
+    transcriptEl.textContent = '"'+text+'"';
+    handleUserInput(text);
+  };
+  recognition.onend = ()=>{ if(!state.busy) setState('STANDBY'); };
+}else{
+  transcriptEl.textContent = 'Reconnaissance vocale non supportée par ce navigateur, utilise le champ texte.';
+}
+
+el('mic').onclick = ()=>{
+  if(!recognition){ return; }
+  if(!state.claudeKey){ el('panel').classList.add('open'); return; }
+  recognition.lang = state.lang;
+  el('mic').classList.add('active');
+  try{ recognition.start(); }catch(e){}
+  setTimeout(()=> el('mic').classList.remove('active'), 4000);
+};
+
+el('sendText').onclick = ()=>{
+  const v = el('textInput').value.trim();
+  if(!v) return;
+  el('textInput').value='';
+  transcriptEl.textContent = '"'+v+'"';
+  handleUserInput(v);
+};
+el('textInput').addEventListener('keydown', e=>{ if(e.key==='Enter') el('sendText').click(); });
+
+// ---- AI call (multi-fournisseur) ----
+const SYSTEM_PROMPT = "Tu es J.A.R.V.I.S., l'assistant IA de Tony Stark : calme, précis, un peu pince-sans-rire, toujours utile. Réponds en français, de façon concise (2-4 phrases max), sauf si on te demande plus de détails.";
+
+async function askAI(prompt){
+  if(state.provider === 'groq') return askGroq(prompt);
+  if(state.provider === 'gemini') return askGemini(prompt);
+  if(state.provider === 'melious') return askMelious(prompt);
+  return askClaude(prompt);
+}
+
+async function askClaude(prompt){
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key': state.claudeKey,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body: JSON.stringify({
+      model:'claude-sonnet-4-6',
+      max_tokens: 400,
+      system: SYSTEM_PROMPT,
+      messages:[{role:'user', content: prompt}]
+    })
+  });
+  if(!res.ok){ throw new Error('Claude API: '+res.status); }
+  const data = await res.json();
+  const textBlock = data.content.find(b=>b.type==='text');
+  return textBlock ? textBlock.text : "...";
+}
+
+async function askGroq(prompt){
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization': 'Bearer ' + state.claudeKey
+    },
+    body: JSON.stringify({
+      model:'llama-3.3-70b-versatile',
+      max_tokens: 400,
+      messages:[
+        {role:'system', content: SYSTEM_PROMPT},
+        {role:'user', content: prompt}
+      ]
+    })
+  });
+  if(!res.ok){ throw new Error('Groq API: '+res.status); }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "...";
+}
+
+async function askGemini(prompt){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.claudeKey}`;
+  const res = await fetch(url, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts:[{ text: SYSTEM_PROMPT }] },
+      contents:[{ role:'user', parts:[{ text: prompt }] }]
+    })
+  });
+  if(!res.ok){ throw new Error('Gemini API: '+res.status); }
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
+}
+
+async function askMelious(prompt){
+  const res = await fetch('https://api.melious.ai/v1/chat/completions', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization': 'Bearer ' + state.claudeKey
+    },
+    body: JSON.stringify({
+      model:'gpt-oss-120b',
+      messages:[
+        {role:'system', content: SYSTEM_PROMPT},
+        {role:'user', content: prompt}
+      ]
+    })
+  });
+  if(!res.ok){ throw new Error('Melious API: '+res.status); }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "...";
+}
+
+// ---- ElevenLabs TTS ----
+async function speak(text){
+  if(!state.elKey || !state.elVoice){
+    // no voice configured, just show text
+    return;
+  }
+  setState('PAROLE');
+  try{
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${state.elVoice}`, {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'xi-api-key': state.elKey
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id:'eleven_multilingual_v2',
+        voice_settings:{ stability:0.5, similarity_boost:0.75 }
+      })
+    });
+    if(!res.ok) throw new Error('ElevenLabs: '+res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = ()=> setState('STANDBY');
+    audio.play();
+  }catch(e){
+    console.error(e);
+    setState('STANDBY');
+  }
+}
+
+async function handleUserInput(text){
+  if(!state.claudeKey){ transcriptEl.textContent = 'Configure ta clé API dans les réglages ⚙'; el('panel').classList.add('open'); return; }
+  state.busy = true;
+  setState('ANALYSE');
+  try{
+    const reply = await askAI(text);
+    transcriptEl.textContent = reply;
+    await speak(reply);
+    if(!state.elKey || !state.elVoice) setState('STANDBY');
+  }catch(e){
+    console.error(e);
+    transcriptEl.textContent = 'Erreur: '+e.message;
+    setState('STANDBY');
+  }
+  state.busy = false;
+}
+</script>
+</body>
+</html>
