@@ -144,7 +144,7 @@
     </select>
   </div>
   <div class="note">
-    Ces clés restent en mémoire seulement le temps de la session (rien n'est stocké sur disque ni envoyé ailleurs qu'à Anthropic / ElevenLabs directement depuis ce téléphone). Referme et rouvre l'app = à re-saisir.
+    Ces infos sont sauvegardées dans ton navigateur (sur ce téléphone uniquement) pour ne pas avoir à les retaper. Elles ne sont jamais envoyées ailleurs qu'aux services choisis.
   </div>
   <button class="primary" id="closePanel">ACTIVER</button>
 </div>
@@ -216,9 +216,23 @@ el('closePanel').onclick = ()=>{
   state.elVoice = el('elVoice').value.trim();
   state.proxyUrl = el('proxyUrl').value.trim();
   state.lang = el('langSelect').value;
+  try{ localStorage.setItem('jarvisSettings', JSON.stringify(state)); }catch(e){}
   el('panel').classList.remove('open');
   setState('STANDBY');
 };
+// recharge les réglages sauvegardés précédemment
+try{
+  const saved = JSON.parse(localStorage.getItem('jarvisSettings') || 'null');
+  if(saved){
+    Object.assign(state, saved);
+    el('providerSelect').value = state.provider;
+    el('claudeKey').value = state.claudeKey;
+    el('elKey').value = state.elKey;
+    el('elVoice').value = state.elVoice;
+    el('proxyUrl').value = state.proxyUrl;
+    el('langSelect').value = state.lang;
+  }
+}catch(e){}
 updateProviderUI();
 // open settings on first load if no keys
 if(!state.claudeKey) el('panel').classList.add('open');
@@ -384,4 +398,4 @@ async function handleUserInput(text){
 }
 </script>
 </body>
-  </html>
+</html>
