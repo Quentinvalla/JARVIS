@@ -491,7 +491,7 @@ function tryLocalCommand(text){
     return true;
   }
 
-  // Minuteur : "mets un minuteur  de 5 minutes", "minuterie 30 secondes", "chrono de 2h"
+  // Minuteur : "mets un minuteur de 5 minutes", "minuterie 30 secondes", "chrono de 2h"
   if(/minut(eur|erie)|chrono/.test(low)){
     const match = low.match(/(\d+)\s*(heures?|h\b|minutes?|min\b|m\b|secondes?|sec\b|s\b)/);
     if(match){
@@ -614,7 +614,7 @@ async function speak(text){
   if(state.muted || !state.elKey || !state.elVoice){
     return;
   }
-  // Coupe toute voix encore en cours pour éviter les réponses qui se chevauchent
+  // Coupe toute voix encore en cours pour éviter 
   if(currentAudio){
     currentAudio.pause();
     currentAudio = null;
@@ -659,15 +659,25 @@ async function handleUserInput(text){
   setState('ANALYSE');
   try{
     const reply = await askAI(text);
-    state.history.push({role:'user', content:text}, {role:'assistant', content:reply});
-    if(state.history.length > 12) state.history = state.history.slice(-12);
+    // on tronque ce qu'on garde en mémoire pour éviter que l'historique devienne trop gros
+    const trimmedReply = reply.length > 400 ? reply.slice(0,400)+'…' : reply;
+    state.history.push({role:'user', content:text}, {role:'assistant', content:trimmedReply});
+    if(state.history.length > 8) state.history = state.history.slice(-8);
+    saveSettings();
     transcriptEl.textContent = reply;
     await speak(reply);
     if(!state.elKey || !state.elVoice || state.muted) setState('STANDBY');
   }catch(e){
     console.error(e);
-    transcriptEl.textContent = 'Erreur: '+e.message;
-    setState('STANDBY');
+    if(e.message && e.message.includes('413')){
+      state.history = [];
+      saveSettings();
+      transcriptEl.textContent = "Mémoire trop pleine, je viens de la vider — répète ta question, monsieur.";
+      speak(transcriptEl.textContent);
+    }else{
+      transcriptEl.textContent = 'Erreur: '+e.message;
+      setState('STANDBY');
+    }
   }
   state.busy = false;
 }
